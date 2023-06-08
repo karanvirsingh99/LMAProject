@@ -1,0 +1,364 @@
+---
+title: "COEUR BT and ADAPT LMAs Analysis"
+author: "Karanvir Singh"
+date: "2023-04-11"
+format:
+  html:
+    code-fold: true
+    
+project:
+  type: default
+  execute-dir: project
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+library(tidyverse)
+library(ggsci)
+library(cowplot)
+library(ggpubr)
+library(rstatix)
+```
+
+I have identified neighborhood in each image stained with the BT and ADAPT panel from the COEUR TMAs. I need to import this cell level data, filter for the cases that we are using in the heatmap (have survival analysis, samples are pre-treatment).
+
+# Pre-processing
+
+## Importing .RData files from the SPIAT workflow
+
+```{r import}
+load("/Users/karanvir/Documents/LMAProject/COEUR/Results/Spatial Analysis/RData/BT_15r_15n_SPIAT.RData")
+btNeighborhoods <- neighborhoods
+load("/Users/karanvir/Documents/LMAProject/COEUR/Results/Spatial Analysis/RData/ADAPT_15r_15n_SPIAT.RData")
+adaptNeighborhoods <- neighborhoods
+rm(neighborhoods)
+
+stroma_information<- read.csv("../../../Final_Data/COMBINED_PANELS_DENSITIES_08NOV22.csv") %>%
+  select(pNum, avg_epi_prop)
+
+
+
+```
+
+## Collapse list into one dataframe
+
+```{r}
+btNeighborhoods <- bind_rows(btNeighborhoods, .id="Image")
+adaptNeighborhoods <- bind_rows(adaptNeighborhoods, .id="Image")
+```
+
+## Filter for patients used in TME clustering and survival analysis
+
+```{r, message=FALSE}
+harmonizedCounts <- vroom::vroom("/Users/karanvir/Documents/LMAProject/COEUR/Final_Data/COMBINED_PANELS_DENSITIES_08NOV22.csv")
+countsbt <- vroom::vroom("/Users/karanvir/Documents/LMAProject/COEUR/Final_Data/BT_per_image_counts.csv")
+countsadapt <- vroom::vroom("/Users/karanvir/Documents/LMAProject/COEUR/Final_Data/ADAPT_per_image_counts.csv")
+tme <- vroom::vroom("../../Clustering/TME_pNum_key.txt")
+
+# Adding patient identified to the cell level data
+btNeighborhoods <- left_join(btNeighborhoods, countsbt %>% select(Image, pNum))
+adaptNeighborhoods <- left_join(adaptNeighborhoods, countsadapt %>% select(Image, pNum))
+
+# Filter for pNums with TME data
+btNeighborhoods <- filter(btNeighborhoods, pNum %in% tme$pNum)
+adaptNeighborhoods <- filter(adaptNeighborhoods, pNum %in% tme$pNum)
+```
+
+## Cluster the neighborhoods into distinct LMA types
+
+Using the clusterNeighborhoods function in */COEUR/Scripts/Neighborhood Analysis/SPIAT_functions.R*. **add methods for neighborhood detection**
+
+```{r, message=FALSE}
+source("/Users/karanvir/Documents/LMAProject/COEUR/Scripts/Neighborhood Analysis/SPIAT_functions.R")
+btLMAs <- clusterNeighborhoods(btNeighborhoods, 7)
+adaptLMAs <- clusterNeighborhoods(adaptNeighborhoods, 7)
+```
+
+# Visualize composition of each LMA type
+
+## BT Panel
+
+**Figure 1a**
+
+```{r}
+getClusterPlots(btLMAs, breaks = c("CD3pCD8n", "CD3pCD8p", "CD79ApCD20n", "CD20p", "CD3pCD8nFoxP3p", "CD3pCD8pFoxP3p"), cell_type_colors = c("#377EB8",
+                                "#E41A1C",
+                                "#4DAF4A",
+                                "#FF7F00",
+                                "#FFFF33",
+                                "#F781BF"))
+```
+
+Renaming LMAs for easier interpretation - LMA1 is mostly **B cells** (B1), LMA7-2-6 have similar compositions **(mostly T cells)**, with decreasing CD8+ and increasing CD8- proportions (T1,T2,T3). LMA5-4-3 are mostly **plasma cell** dominated with increasing proportions of plasma cells (P1,P2,P3).
+
+**Figure 1b**
+
+```{r}
+btLMAs$LMA <- recode_factor(btLMAs$LMA, `7`="T1", `2`="T2", `6`="T3", `5`="P1", `4`="P2", `3`="P3", `1`="B1")
+
+getClusterPlots(btLMAs, breaks = c("CD3pCD8n", "CD3pCD8p", "CD79ApCD20n", "CD20p", "CD3pCD8nFoxP3p", "CD3pCD8pFoxP3p"), cell_type_colors = c("#377EB8",
+                                "#E41A1C",
+                                "#4DAF4A",
+                                "#FF7F00",
+                                "#FFFF33",
+                                "#F781BF"))
+```
+
+## ADAPT Panel
+
+**Figure 2a**
+
+```{r}
+getClusterPlots(adaptLMAs, breaks =  c("CD68pPDL1n", "CD68pPDL1p", "CD3pCD8pPD1n", "CD3pCD8pPD1p", "CD3pCD8nPD1n", "CD3pCD8nPD1p"), cell_type_colors = c("#4DAF4A",
+              "#FFFF33",
+              
+              "#f4a3a5",
+              "#e41a1d",
+              "#afcbe3",
+              "#377eb8"))
+```
+
+Renaming LMA1-LMA6-LMA2-4 to **M1-M2-M3-M4**. LMA7-3-5 to **T1-T2-T3**
+
+**Figure 2b**
+
+```{r}
+adaptLMAs$LMA <- recode_factor(adaptLMAs$LMA, `1`="M1", `6`="M2", `2`="M3", `4`="M4", `7`="T1", `3`="T2", `5`="T3")
+getClusterPlots(adaptLMAs, breaks =  c("CD68pPDL1n", "CD68pPDL1p", "CD3pCD8pPD1n", "CD3pCD8pPD1p", "CD3pCD8nPD1n", "CD3pCD8nPD1p"), cell_type_colors = c("#4DAF4A",
+              "#FFFF33",
+              
+              "#f4a3a5",
+              "#e41a1d",
+              "#afcbe3",
+              "#377eb8"))
+```
+
+# TME-LMA relationship
+
+How many communities of each type do I find in cases of each TME?
+
+BT Panel:
+
+```{r}
+btLMAs <- left_join(btLMAs, countsbt %>% select(Image, pNum)) %>% left_join(., tme %>% select(pNum, TME))
+
+btLMAs %>% group_by(TME, LMA) %>% count() %>%
+  ggplot(aes(x=TME, y=n, fill=LMA))+
+  geom_col(position = position_dodge())+
+  scale_fill_npg()+
+  ggtitle("Figure 3: Number of LMAs by TME (BT)")+
+  theme_minimal()+
+  xlab("TME")+
+  ylab("# of LMAs")
+```
+
+ADAPT panel:
+
+```{r}
+adaptLMAs <- left_join(adaptLMAs, countsadapt %>% select(Image, pNum)) %>% left_join(., tme %>% select(pNum, TME))
+
+adaptLMAs %>% group_by(TME, LMA) %>% count() %>%
+  ggplot(aes(x=TME, y=n, fill=LMA))+
+  geom_col(position = position_dodge())+
+  scale_fill_npg()+
+  ggtitle("Figure 4: Number of LMAs by TME (ADAPT)")+
+  theme_minimal()+
+  xlab("TME")+
+  ylab("# of LMAs")
+```
+
+# Stroma percentage and LMAs
+
+How are percentage of stroma in an image and the \# of LMAs of each type detected correlated? I hypothesize that all types of LMAs should be positively correlated with higher stroma since immune cell density is higher in stroma.
+
+```{r, message=FALSE}
+btLMA_matrix <- btLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme %>% select(pNum, TME)) %>%
+  left_join(., stroma_information) %>%
+  pivot_wider(names_from=LMA, values_from = numberOfLMAs, values_fill = 0) %>%
+  ungroup() %>%
+  select(-pNum, -TME)
+
+btLMA_matrix <- btLMA_matrix %>% select(T1, T2, T3, P1, P2, P3, B1, avg_epi_prop) %>%
+  rename("Epithelium prop." = avg_epi_prop)
+
+bt_lma_epi_cor <- cor_mat(btLMA_matrix, vars = names(btLMA_matrix))
+
+rstatix::cor_plot(bt_lma_epi_cor)
+```
+
+```{r}
+adaptLMA_matrix <- adaptLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme %>% select(pNum, TME)) %>%
+  left_join(., stroma_information) %>%
+  pivot_wider(names_from=LMA, values_from = numberOfLMAs, values_fill = 0) %>%
+  ungroup() %>%
+  select(-pNum, -TME)
+
+adaptLMA_matrix <- adaptLMA_matrix  %>%
+  rename("Epithelium prop." = avg_epi_prop)
+
+adapt_lma_epi_cor <- cor_mat(adaptLMA_matrix, vars = names(adaptLMA_matrix))
+
+rstatix::cor_plot(adapt_lma_epi_cor)
+```
+
+Epithelium proportion negatively correlated with all LMA subtypes, except for M1 (PDL1+ macs).
+
+Occurence of each LMA type in high versus low epithelium cases (split at the median). There are 981 total cases - half low, half high epithelium. Out of the 981 cases, *630 have an LMA detected in the adaptive panel, while only 346 have an LMA detected in the BT panel.*
+
+First - how are high and low epithelium cases distributed across the 5 TME?
+
+```{r}
+stroma_information <- stroma_information %>% mutate(EPI_BINARY = case_when(avg_epi_prop >= median(avg_epi_prop) ~ "HIGH",
+                                      TRUE ~ "LOW"))
+
+left_join(tme, stroma_information) %>% ggplot(aes(x=TME, fill=EPI_BINARY))+
+  geom_bar(position=position_dodge())+
+  ylab("Number of cases")+
+  theme_minimal()+
+  ggtitle("Figure 5: Cases stratified by TME and epithelium proportion (n=981)")+
+  scale_fill_manual(name="Epithelium proportion", values = (pal_npg()(2)))
+```
+
+*Most TME5 cases (hot) are high epithelium*
+
+Now, out of all the LMAs detected, how many are in high versus low epithelium cases? I am visualizing this two ways: 1. The total number of LMAs of each type detected in high and low epi cases. 2. Only considering whether that LMA type was detected in a case at all (presence/absence).
+
+```{r}
+bt_stroma <- btLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(EPI_BINARY, LMA) %>% summarise(sumLMAs = sum(numberOfLMAs))
+
+bt_stroma %>% ggplot(aes(x=LMA, y=sumLMAs, fill=EPI_BINARY)) +
+  geom_col(position=position_dodge())+
+  scale_fill_npg(name="Epithelium proportion")+
+  ggtitle("Fig. 6: Total numbers of LMAs detected by epithelium proportion", subtitle = "BT")
+
+bt_stroma_binary <- btLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(EPI_BINARY, LMA) %>% count()
+
+bt_stroma_binary %>% ggplot(aes(x=LMA, y=n, fill=EPI_BINARY))+
+  geom_col(position=position_dodge())+
+   scale_fill_npg(name="Epithelium proportion")+
+  ggtitle("Fig 7: Cases with an LMA by epithelium proportion", subtitle="BT")
+```
+
+Regardless of how I analyze the data (total number of LMAs versus presence or absence), most occurences of each LMA type are in high stroma cases.
+
+Now looking at the adaptive (macrophage) panel:
+
+```{r, message=FALSE}
+adapt_stroma <- adaptLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+    left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(EPI_BINARY, LMA) %>% summarise(sumLMAs = sum(numberOfLMAs))
+
+adapt_stroma %>% ggplot(aes(x=LMA, y=sumLMAs, fill=EPI_BINARY)) +
+  geom_col(position=position_dodge())+
+  scale_fill_npg(name="Epithelium proportion")+
+    theme_minimal()+
+  ggtitle("Fig. 8: Total numbers of LMAs detected by epithelium category", subtitle="ADAPT")
+
+adapt_stroma_binary <- adaptLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+      left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(EPI_BINARY, LMA) %>% count()
+
+adapt_stroma_binary %>% ggplot(aes(x=LMA, y=n, fill=EPI_BINARY)) +
+  geom_col(position=position_dodge())+
+   scale_fill_npg(name="Epithelium proportion")+
+  theme_minimal()+
+  ggtitle("Fig. 9: Cases with an LMA by epithelium", subtitle="ADAPT")
+```
+
+Across the board, the ratio of LMAs in high versus low stroma cases favours high stroma - except for M1, where most of the neighborhoods detected are in low stroma cases (more PDL1 macrophage neighborhoods in low stroma cases).
+
+# Stroma percentage and LMAs - TME5 specific
+
+Maybe there are trends between LMA and stroma proportion that are being masked by the differences in immune infiltration across the 981 cases. If I restrict my analysis to just TME5, are there differences in the occurence of each LMA type between high and low stroma HOT cases?
+
+```{r}
+adapt_tme5_stroma <- adaptLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+ left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(TME, EPI_BINARY, LMA) %>% count() %>% 
+  filter(TME == 5)
+
+tme_str_tally <- left_join(tme, stroma_information) %>%
+  group_by(TME, EPI_BINARY) %>% summarise(n_cases = n())
+
+adapt_tme5_stroma <- adapt_tme5_stroma %>% left_join(tme_str_tally)
+adapt_tme5_stroma <- adapt_tme5_stroma %>% mutate(proportion = n/n_cases)
+
+adapt_tme5_stroma %>% ggplot(aes(x=LMA, y=proportion, fill=EPI_BINARY))+
+  geom_col(position=position_dodge())+
+  scale_fill_npg(name="Epithelium proportion")+
+  theme_minimal()+
+  ggtitle("Fig. 10: Proportion of total cases in TME5 with a detected LMA", subtitle="ADAPT")
+```
+
+A higher proportion of high epithelium cases have M1 and M2 LMAs (in TME5), and less M3 LMAs.
+
+```{r}
+bt_tme5_stroma <- btLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+ left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(TME, EPI_BINARY, LMA) %>% count() %>% 
+  filter(TME == 5)
+
+bt_tme5_stroma <- bt_tme5_stroma %>% left_join(tme_str_tally)
+bt_tme5_stroma <- bt_tme5_stroma %>% mutate(proportion = n/n_cases)
+
+bt_tme5_stroma %>% ggplot(aes(x=LMA, y=proportion, fill=EPI_BINARY))+
+  geom_col(position=position_dodge())+
+  scale_fill_npg(name="Epithelium proportion")+
+  theme_minimal()+
+  ggtitle("Fig. 11: Proportion of total cases in TME5 with a detected LMA", subtitle="BT")
+```
+
+Expanding the last two plots to look at ALL 5 TMEs.
+
+```{r}
+adapt_tme_stroma <- adaptLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(TME, EPI_BINARY, LMA) %>% count()
+
+adapt_tme_stroma <- adapt_tme_stroma %>% left_join(tme_str_tally)
+adapt_tme_stroma <- adapt_tme_stroma %>% mutate(proportion = n/n_cases)
+
+adapt_tme_stroma %>% ggplot(aes(x=LMA, y=proportion, fill=EPI_BINARY))+
+  geom_col(position=position_dodge())+
+    scale_fill_npg(name="Epithelium proportion")+
+  theme_minimal()+
+  ylab("Proportion of HGSC cases with a detected LMA")+
+  facet_wrap(~TME, ncol=5)+
+  coord_flip()+
+  theme(legend.position = "bottom")+
+  ggtitle("Fig.13: Proportion of total cases in TME1-5 with a detected LMA", subtitle="ADAPT")
+```
+
+```{r}
+bt_tme_stroma <- btLMAs %>% group_by(pNum, LMA) %>% summarise(numberOfLMAs = n()) %>%
+  left_join(., tme) %>%
+  left_join(., stroma_information) %>%
+  group_by(TME, EPI_BINARY, LMA) %>% count()
+
+bt_tme_stroma <- bt_tme_stroma %>% left_join(tme_str_tally)
+bt_tme_stroma <- bt_tme_stroma %>% mutate(proportion = n/n_cases)
+
+bt_tme_stroma %>% ggplot(aes(x=LMA, y=proportion, fill=EPI_BINARY))+
+  geom_col(position=position_dodge())+
+    scale_fill_npg(name="Epithelium proportion")+
+  theme_minimal()+
+  ylab("Proportion of HGSC cases with a detected LMA")+
+  facet_wrap(~TME, ncol=5)+
+  coord_flip()+
+  theme(legend.position = "bottom")+
+  ggtitle("Fig.14: Proportion of total cases in TME1-5 with a detected LMA", subtitle="ADAPT")
+```

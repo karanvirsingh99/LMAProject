@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+/.quarto/
+COEUR/Final_Data/
+coreIDs.csv
+patientID_core.csv
+IROC_TMA/Final_Data/
+IROC_WHOLE_SLIDES/raw_data/
+IROC_WHOLE_SLIDES/results/spiat/rdata/

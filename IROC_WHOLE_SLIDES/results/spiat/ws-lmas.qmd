@@ -1,0 +1,123 @@
+---
+title: "IROC Whole Slide LMAs"
+
+format:
+  html:
+    code-fold: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+library(tidyverse)
+library(ggsci)
+library(cowplot)
+library(ggpubr)
+library(rstatix)
+source("/Users/karanvir/Documents/LMAProject/COEUR/Scripts/Neighborhood Analysis/SPIAT_functions.R")
+```
+
+Exploring LMAs in IROC whole slides.
+
+# Summary statistics
+
+I have data from 23 different IROC patients. The max ROIs captured is 15, the minimum is 5.
+
+```{r}
+cellLevel <- vroom::vroom("~/Documents/LMAProject/IROC_WHOLE_SLIDES/raw_data/07Jun23_clean_cell_level.tsv.gz")
+
+cellLevel$Patient <- stringr::str_split_i(cellLevel$Image, "_", 1)
+
+n_images <- cellLevel %>% group_by(Patient) %>% summarise(n_images = length(unique(Image))) %>%
+  arrange(n_images)
+
+n_images$Patient <- fct_relevel(n_images$Patient, n_images$Patient)
+
+n_images %>% ggplot(aes(x=Patient, y=n_images))+
+  geom_col()+
+  coord_flip()+
+  xlab("Number of images")+
+  cowplot::theme_cowplot()
+```
+
+Comparing 7 LMAs in whole slides to 7 LMAs in IROC TMAs.
+
+```{r}
+load("/Users/karanvir/Documents/LMAProject/IROC_WHOLE_SLIDES/results/spiat/rdata/IROC_WS_15r_15n_SPIAT.RData")
+neighborhoods_df <- bind_rows(neighborhoods, .id = "Image")
+
+clustered <- clusterNeighborhoods(neighborhoods_df, 7)
+
+# Changing order of clusters based on resemblance to TMA LMAs
+clustered$LMA <- factor(as.character(clustered$LMA))
+clustered$LMA <- fct_relevel(clustered$LMA, "4","3","1","2","7","6","5")
+
+barplots_ws <- getClusterPlots(clustered, breaks = c("CD3pCD8nPD1p", "CD3pCD8nPD1n", "CD3pCD8pPD1p", "CD3pCD8pPD1n", "CD68pPDL1n", 
+"CD68pPDL1p", "CD79ApCD20p", "CD79ApCD20n",  "CD3nPD1p"), cell_type_colors = c("#E64B35FF",
+                                                                                   "#f5b8af",
+                                                                                   "#358295",
+                                                                                   "#a6ddea",
+                                                                                   "green",
+                                                                                   "yellow",
+                                                                                   "#744960",
+                                                                                   "#d4a2bc",
+                                                                                   "black"))
+```
+
+```{r}
+load("/Users/karanvir/Documents/LMAProject/IROC_TMA/Results/Neighborhood-analysis/RData/IROCTMA_15r_15n_SPIAT.RData")
+neighborhoods_tma_df <- bind_rows(neighborhoods, .id = "Image")
+
+clustered_tma <- clusterNeighborhoods(neighborhoods_tma_df, 7)
+
+barplots_tma <- getClusterPlots(clustered_tma, breaks = c("CD3pCD8nPD1p", "CD3pCD8nPD1n", "CD3pCD8pPD1p", "CD3pCD8pPD1n", "CD68pPDL1n", 
+"CD68pPDL1p", "CD20p", "CD79ApCD20n",  "PD1p"), cell_type_colors = c("#E64B35FF",
+                                                                                   "#f5b8af",
+                                                                                   "#358295",
+                                                                                   "#a6ddea",
+                                                                                   "green",
+                                                                                   "yellow",
+                                                                                   "#744960",
+                                                                                   "#d4a2bc",
+                                                                                   "black"))
+```
+
+```{r, out.height="200%", out.width="100%"}
+ggpubr::ggarrange(barplots_ws, barplots_tma, nrow=2)
+```
+
+I can compare the proportions of each LMA to each other by running Analysis of Similarities (ANOSIM) between pairs of LMAs. A score close to 1 indicates dissimilarities in composition, while a score close to 0 indicates that composition of species (ie. cell types) between the two is similar.
+
+```{r, eval=FALSE}
+
+# Analysis of similarities, pairwise between group1 and each of group2
+
+pairwiseANOSIM <- function(group1, group2=c("1","2","3","4","5","6","7")) {
+  wholeSlide <- clustered %>% filter(LMA == {{group1}}) %>% select(-Image, -LMA, -Neighborhood) %>% mutate(Group = "WS")
+  
+  pairwise_results <- lapply(group2, function(x){
+     TMA <- clustered_tma %>% filter(LMA == {{x}}) %>% mutate(Group = "TMA") %>% select(-Image, -LMA, -Neighborhood) %>% mutate(Group = "TMA")
+  
+  test_matrix <- bind_rows(wholeSlide, TMA)
+  grouping_var <- test_matrix$Group
+  test_matrix <- test_matrix[,1:9] %>% as.matrix()
+  test_matrix_prop <- t(apply(test_matrix,1, function(x) x/sum(x)))
+  anosim_output <- vegan::anosim(test_matrix_prop, grouping = grouping_var, distance = "bray", permutations = 999)
+  
+  anosim_summary <- data.frame(WS_LMA = group1,
+                               TMA_LMA = group2,
+                               ANOSIM = anosim_output$statistic,
+                               p = anosim_output$signif)
+  })
+  
+  pairwise_results_df <- bind_rows(pairwise_results)
+}
+
+
+# Need to make sure phenotypes match
+clustered_tma <- clustered_tma %>% dplyr::rename(CD79ApCD20p = "CD20p",
+                                          CD3nPD1p = "PD1p")
+
+# Running the pairwiseANOSIM function for LMAs 1:7 for the WS
+ANOSIMresults <- lapply(c("1", "2", "3", "4", "5", "6", "7"), pairwiseANOSIM)
+```

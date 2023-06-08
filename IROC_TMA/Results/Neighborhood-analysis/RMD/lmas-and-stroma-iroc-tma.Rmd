@@ -1,0 +1,74 @@
+---
+title: "LMAs and Stroma (IROC)"
+author: "Karanvir Singh"
+date: "2023-05-01"
+format:
+  html:
+    code-fold: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+
+library(tidyverse)
+library(cowplot)
+library(ggpubr)
+source("/Users/karanvir/Documents/LMAProject/COEUR/Scripts/Neighborhood Analysis/SPIAT_functions.R")
+```
+
+## Figure 1 - LMA barplots
+
+```{r}
+lma <- vroom::vroom("/Users/karanvir/Documents/LMAProject/IROC_TMA/Results/Neighborhood-analysis/7LMAs_15r15n_IROC_TMA.csv")
+
+colnames(lma) <- gsub("CD20p" , "CD79ApCD20p", colnames(lma)) %>%
+  gsub("^PD1p$", "CD3nCD8nPD1p", .)
+
+getClusterPlots(lma, breaks = c("CD3pCD8nPD1p", "CD3pCD8nPD1n", "CD3pCD8pPD1p", "CD3pCD8pPD1n", "CD68pPDL1n", 
+"CD68pPDL1p", "CD79ApCD20p", "CD79ApCD20n",  "CD3nCD8nPD1p"), cell_type_colors = c("#E64B35FF",
+                                                                                   "#f5b8af",
+                                                                                   "#358295",
+                                                                                   "#a6ddea",
+                                                                                   "green",
+                                                                                   "yellow",
+                                                                                   "#744960",
+                                                                                   "#d4a2bc",
+                                                                                   "black"))
+```
+
+## Figure 2: Number of cases by stroma percentage
+
+There are 60 cores with neighborhoods detected, out of 137 images stained. The median stroma proportion is 38% - cases with more stroma than these are catagorizes as 'high', lower as 'low'.
+
+The total number of LMAs detected is quite similar between high and low stroma cases, however the distribution by LMA subtype is different. There are more LMA5/6/7 in low stroma cores (these are the LMAs with more PDL1p macs). LMA1/2/3 are found in high stroma cores more often (these are the LMAs with more PDL1- macs).
+
+```{r}
+densities <- vroom::vroom("/Users/karanvir/Documents/LMAProject/IROC_TMA/Results/IROC-tma-per-patient-densities.csv")
+counts <- vroom::vroom("/Users/karanvir/Documents/LMAProject/IROC_TMA/Results/IROC-tma-per-image-counts.csv")
+
+lma <- left_join(lma, counts %>% select(Image, ID))
+lma <- left_join(lma, densities %>% select(ID, stroma_proportion))
+lma <-  mutate(lma, stroma_cat = case_when(stroma_proportion <= median(stroma_proportion) ~ "low",
+                                           TRUE ~ "high"))
+
+stroma_tally <- lma %>% group_by(ID, LMA, stroma_cat) %>% summarise(numberOfLMAs = n()) %>%
+  group_by(stroma_cat, LMA) %>% summarise(sumLMAs = sum(numberOfLMAs))
+
+
+stroma_tally %>% 
+  ggplot(aes(x=stroma_cat, y=sumLMAs)) +
+  geom_col(position=position_dodge())+
+  xlab("Stroma category")+
+  ylab("Nunber of LMAs")+
+  ggtitle("Fig. 2: Total number of neighborhoods detected by stroma %")
+
+stroma_tally %>% 
+  ggplot(aes(x=stroma_cat, y=sumLMAs)) +
+  geom_col(position=position_dodge())+
+  facet_wrap(~LMA, nrow=1)+
+  xlab("Stroma category")+
+  ylab("Nunber of LMAs")+
+  ggtitle("Fig. 3: Total number of neighborhoods detected by stroma % and LMA type")
+```

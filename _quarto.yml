@@ -1,0 +1,36 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - COEUR/Results/Clustering/COEUR_Clustering.qmd
+    - COEUR/Results/Spatial Analysis/RMD/BT-adapt-clustering-followup-analysis.qmd
+    - IROC_TMA/Results/Neighborhood-analysis/RMD/lmas-and-stroma-iroc-tma.Rmd
+    - IROC_WHOLE_SLIDES/results/spiat/ws-lmas.qmd
+    
+website:
+  title: "LMAProject"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - text: "COEUR"
+        menu:
+          - text: "TME Clustering"
+            file: COEUR/Results/Clustering/COEUR_Clustering.qmd
+          - text: "LMA Analysis"
+            file: COEUR/Results/Spatial Analysis/RMD/BT-adapt-clustering-followup-analysis.qmd
+      - text: "IROC"
+        menu:
+          - text: "TMA"
+            file: IROC_TMA/Results/Neighborhood-analysis/RMD/lmas-and-stroma-iroc-tma.Rmd
+          - text: "Whole Slide"
+            file: IROC_WHOLE_SLIDES/results/spiat/ws-lmas.qmd
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true
+
+editor: visual
+
